@@ -1,3 +1,5 @@
+from typing import List, Optional
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 import traceback
 
 import dynamic_pricing as dp
+import policy_management as pm
 import os
 
 MODEL_PATH = "model.joblib"
@@ -31,10 +34,93 @@ class PredictRequest(BaseModel):
     safe_zone: float = Field(ge=0, le=1, description="Safe zone score between 0 and 1")
 
 
+class PolicyBase(BaseModel):
+    worker_name: str = Field(..., description="Worker name for the policy")
+    policy_number: str = Field(..., description="Unique policy number")
+    coverage_type: str = Field(..., description="Selected coverage tier")
+    weekly_premium: float = Field(ge=0, description="Weekly premium amount")
+    active: bool = Field(default=True, description="Whether the policy is currently active")
+    notes: Optional[str] = Field(None, description="Optional policy notes")
+
+
+class PolicyCreate(PolicyBase):
+    pass
+
+
+class PolicyUpdate(BaseModel):
+    worker_name: Optional[str] = None
+    policy_number: Optional[str] = None
+    coverage_type: Optional[str] = None
+    weekly_premium: Optional[float] = None
+    active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class PolicyResponse(PolicyBase):
+    id: str
+
+
 @app.options("/api/predict")
 async def options_predict():
     """Handle CORS preflight requests"""
     return {"message": "OK"}
+
+
+@app.get("/api/policies", response_model=List[PolicyResponse])
+def list_policies():
+    try:
+        return pm.list_policies()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/policies/{policy_id}", response_model=PolicyResponse)
+def get_policy(policy_id: str):
+    try:
+        policy = pm.get_policy(policy_id)
+        if not policy:
+            raise HTTPException(status_code=404, detail="Policy not found")
+        return policy
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/policies", response_model=PolicyResponse)
+def create_policy(policy: PolicyCreate):
+    try:
+        return pm.create_policy(policy.dict())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/policies/{policy_id}", response_model=PolicyResponse)
+def update_policy(policy_id: str, update: PolicyUpdate):
+    try:
+        updated = pm.update_policy(policy_id, update.dict(exclude_none=True))
+        if not updated:
+            raise HTTPException(status_code=404, detail="Policy not found")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/policies/{policy_id}")
+def delete_policy(policy_id: str):
+    try:
+        deleted = pm.delete_policy(policy_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Policy not found")
+        return {"deleted": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.on_event("startup")

@@ -6,6 +6,7 @@ import PayoutBanner from "@/components/PayoutBanner";
 import TelemetryCard from "@/components/TelemetryCard";
 import MicroLedger from "@/components/MicroLedger";
 import PolicyCard from "@/components/PolicyCard";
+import PolicyManagement from "@/components/PolicyManagement";
 import DynamicPricing from "@/components/DynamicPricing";
 
 const telemetry = [
@@ -91,6 +92,10 @@ const Index = () => {
 
         <div className="mt-6">
           <PolicyCard />
+        </div>
+
+        <div className="mt-6">
+          <PolicyManagement />
         </div>
 
         <div className="mt-6">
