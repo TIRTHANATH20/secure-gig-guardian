@@ -82,6 +82,21 @@ The FastAPI server runs on `http://localhost:8000` by default.
 
 Environment variables for backend can be set in the terminal or a `.env` file.
 
+### Authentication Configuration
+
+Sign-in is handled via Supabase Auth. Configure frontend environment variables:
+
+```env
+VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<your-anon-publishable-key>
+SUPABASE_URL=https://<your-project-ref>.supabase.co
+SUPABASE_ANON_KEY=<your-anon-publishable-key>
+```
+
+- Users sign in/sign up from the `/auth` page.
+- Protected pages are guarded client-side by Supabase session state (`AuthProvider` + `ProtectedRoute`).
+- Policy API ownership checks are enforced server-side using the Supabase bearer token and user identity.
+
 ### Deploying to Render
 
 This repo includes a `Dockerfile` that builds the frontend and runs the FastAPI backend. To deploy on Render you can use the provided `render.yaml` manifest which will build the Docker image and run the service.
@@ -95,12 +110,14 @@ Steps:
 	- `MONGODB_URI` — e.g. `mongodb://username:password@host:27017` (leave blank to use the in-memory fallback)
 	- `MONGODB_DB` — `secure_gig_guardian`
 	- `MONGODB_COLLECTION` — `insurance_policies`
+	- `MONGODB_CLAIMS_COLLECTION` — `claims`
 
 4. Optionally set `PORT` (the Docker container respects the `PORT` env var). Render sets this automatically.
 
 Notes:
 
 - If `MONGODB_URI` is not set or the database is unreachable, the app falls back to an in-memory policy store (data will not persist across restarts). Set `MONGODB_URI` to enable persistence.
+- Claims use the same MongoDB connection and can be configured with `MONGODB_CLAIMS_COLLECTION`.
 - The Dockerfile already builds the frontend into `/app/dist` and the backend serves that folder when present.
  - The Dockerfile already builds the frontend into `/app/dist` and the backend serves that folder when present.
 

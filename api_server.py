@@ -1,16 +1,50 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import json
 import traceback
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import dynamic_pricing as dp
 import policy_management as pm
+import claims_management as cm
 import os
 
+
+def _load_env_file(path: str) -> None:
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception:
+        # Keep startup resilient even if env file has malformed lines.
+        pass
+
+
+# Make backend read local frontend env files too, so Supabase keys are available.
+_load_env_file(".env")
+_load_env_file(".env.local")
+
 MODEL_PATH = "model.joblib"
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+SUPABASE_ANON_KEY = (
+    os.getenv("SUPABASE_ANON_KEY")
+    or os.getenv("SUPABASE_PUBLISHABLE_KEY")
+    or os.getenv("VITE_SUPABASE_PUBLISHABLE_KEY")
+)
 
 app = FastAPI(title="Dynamic Pricing API")
 
@@ -60,6 +94,75 @@ class PolicyResponse(PolicyBase):
     id: str
 
 
+class ClaimBase(BaseModel):
+    policy_id: str = Field(..., description="Policy id linked to the claim")
+    claim_number: str = Field(..., description="Unique claim number for this user")
+    title: str = Field(..., description="Claim title")
+    description: str = Field(..., description="Claim details")
+    claim_amount: float = Field(ge=0, description="Claim amount requested")
+    status: str = Field(default="pending", description="Claim status")
+    admin_notes: Optional[str] = Field(None, description="Admin notes")
+
+
+class ClaimCreate(ClaimBase):
+    pass
+
+
+class ClaimUpdate(BaseModel):
+    policy_id: Optional[str] = None
+    claim_number: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    claim_amount: Optional[float] = None
+    status: Optional[str] = None
+    admin_notes: Optional[str] = None
+
+
+class ClaimResponse(ClaimBase):
+    id: str
+
+
+def _fetch_supabase_user(token: str) -> Dict[str, Any]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Supabase auth is not configured on backend. "
+                "Set SUPABASE_URL and SUPABASE_ANON_KEY (or VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY)."
+            ),
+        )
+
+    req = Request(
+        f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "apikey": SUPABASE_ANON_KEY,
+        },
+        method="GET",
+    )
+
+    try:
+        with urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body)
+    except HTTPError:
+        raise HTTPException(status_code=401, detail="Invalid or expired auth token")
+    except URLError:
+        raise HTTPException(status_code=503, detail="Auth provider unavailable")
+
+
+def require_user_id(authorization: Optional[str] = Header(default=None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    token = authorization.split(" ", 1)[1].strip()
+    user = _fetch_supabase_user(token)
+    user_id = user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid authenticated user")
+    return str(user_id)
+
+
 @app.options("/api/predict")
 async def options_predict():
     """Handle CORS preflight requests"""
@@ -67,17 +170,17 @@ async def options_predict():
 
 
 @app.get("/api/policies", response_model=List[PolicyResponse])
-def list_policies():
+def list_policies(user_id: str = Depends(require_user_id)):
     try:
-        return pm.list_policies()
+        return pm.list_policies(user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/policies/{policy_id}", response_model=PolicyResponse)
-def get_policy(policy_id: str):
+def get_policy(policy_id: str, user_id: str = Depends(require_user_id)):
     try:
-        policy = pm.get_policy(policy_id)
+        policy = pm.get_policy(policy_id, user_id)
         if not policy:
             raise HTTPException(status_code=404, detail="Policy not found")
         return policy
@@ -88,9 +191,9 @@ def get_policy(policy_id: str):
 
 
 @app.post("/api/policies", response_model=PolicyResponse)
-def create_policy(policy: PolicyCreate):
+def create_policy(policy: PolicyCreate, user_id: str = Depends(require_user_id)):
     try:
-        return pm.create_policy(policy.dict())
+        return pm.create_policy(policy.dict(), user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -98,9 +201,9 @@ def create_policy(policy: PolicyCreate):
 
 
 @app.put("/api/policies/{policy_id}", response_model=PolicyResponse)
-def update_policy(policy_id: str, update: PolicyUpdate):
+def update_policy(policy_id: str, update: PolicyUpdate, user_id: str = Depends(require_user_id)):
     try:
-        updated = pm.update_policy(policy_id, update.dict(exclude_none=True))
+        updated = pm.update_policy(policy_id, update.dict(exclude_none=True), user_id)
         if not updated:
             raise HTTPException(status_code=404, detail="Policy not found")
         return updated
@@ -111,11 +214,68 @@ def update_policy(policy_id: str, update: PolicyUpdate):
 
 
 @app.delete("/api/policies/{policy_id}")
-def delete_policy(policy_id: str):
+def delete_policy(policy_id: str, user_id: str = Depends(require_user_id)):
     try:
-        deleted = pm.delete_policy(policy_id)
+        deleted = pm.delete_policy(policy_id, user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Policy not found")
+        return {"deleted": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claims", response_model=List[ClaimResponse])
+def list_claims(user_id: str = Depends(require_user_id)):
+    try:
+        return cm.list_claims(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claims/{claim_id}", response_model=ClaimResponse)
+def get_claim(claim_id: str, user_id: str = Depends(require_user_id)):
+    try:
+        claim = cm.get_claim(claim_id, user_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        return claim
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claims", response_model=ClaimResponse)
+def create_claim(claim: ClaimCreate, user_id: str = Depends(require_user_id)):
+    try:
+        return cm.create_claim(claim.dict(), user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/claims/{claim_id}", response_model=ClaimResponse)
+def update_claim(claim_id: str, update: ClaimUpdate, user_id: str = Depends(require_user_id)):
+    try:
+        updated = cm.update_claim(claim_id, update.dict(exclude_none=True), user_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/claims/{claim_id}")
+def delete_claim(claim_id: str, user_id: str = Depends(require_user_id)):
+    try:
+        deleted = cm.delete_claim(claim_id, user_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Claim not found")
         return {"deleted": True}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

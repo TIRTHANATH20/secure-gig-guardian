@@ -33,22 +33,25 @@ class _InMemoryCollection:
     def create_index(self, *args, **kwargs):
         return None
 
-    def find(self):
-        return _InMemoryQuery(self._docs)
+    def _matches(self, doc, filt):
+        if not filt:
+            return True
+        for key, value in filt.items():
+            if doc.get(key) != value:
+                return False
+        return True
+
+    def find(self, filt=None):
+        if not filt:
+            return _InMemoryQuery(self._docs)
+        return _InMemoryQuery([d for d in self._docs if self._matches(d, filt)])
 
     def find_one(self, filt):
         if not filt:
             return None
-        # support lookup by _id or policy_number
-        if "_id" in filt:
-            target = filt["_id"]
-            for d in self._docs:
-                if d.get("_id") == target:
-                    return d
-        if "policy_number" in filt:
-            for d in self._docs:
-                if d.get("policy_number") == filt["policy_number"]:
-                    return d
+        for d in self._docs:
+            if self._matches(d, filt):
+                return d
         return None
 
     def insert_one(self, document):
@@ -56,11 +59,12 @@ class _InMemoryCollection:
             doc = dict(document)
             if "_id" not in doc:
                 doc["_id"] = ObjectId()
-            # enforce unique policy_number if provided
+            # enforce unique policy_number per owner
             pn = doc.get("policy_number")
-            if pn:
+            owner_id = doc.get("owner_id")
+            if pn and owner_id:
                 for d in self._docs:
-                    if d.get("policy_number") == pn:
+                    if d.get("policy_number") == pn and d.get("owner_id") == owner_id:
                         raise DuplicateKeyError("duplicate key error")
             self._docs.append(doc)
             class _Res: pass
@@ -71,12 +75,10 @@ class _InMemoryCollection:
     def update_one(self, filt, update):
         with self._lock:
             target = None
-            if "_id" in filt:
-                tid = filt["_id"]
-                for d in self._docs:
-                    if d.get("_id") == tid:
-                        target = d
-                        break
+            for d in self._docs:
+                if self._matches(d, filt):
+                    target = d
+                    break
             if not target:
                 class _Res: pass
                 r = _Res()
@@ -94,12 +96,10 @@ class _InMemoryCollection:
     def delete_one(self, filt):
         with self._lock:
             target = None
-            if "_id" in filt:
-                tid = filt["_id"]
-                for i, d in enumerate(self._docs):
-                    if d.get("_id") == tid:
-                        target = i
-                        break
+            for i, d in enumerate(self._docs):
+                if self._matches(d, filt):
+                    target = i
+                    break
             if target is None:
                 class _Res: pass
                 r = _Res()
@@ -125,7 +125,15 @@ if MONGO_URI:
         client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         db = client[MONGO_DB]
         collection = db[MONGO_COLLECTION]
-        collection.create_index("policy_number", unique=True, sparse=True)
+        # Prefer per-user uniqueness: same policy number can exist across different users.
+        collection.create_index([("owner_id", 1), ("policy_number", 1)], unique=True, sparse=True)
+        # Best-effort cleanup of legacy global unique index if present.
+        try:
+            index_info = collection.index_information()
+            if "policy_number_1" in index_info:
+                collection.drop_index("policy_number_1")
+        except Exception:
+            pass
     except PyMongoError as exc:
         print(f"MongoDB initialization error: {exc}")
         client = None
@@ -159,23 +167,24 @@ def _require_collection() -> Any:
     return collection
 
 
-def list_policies() -> List[Dict[str, Any]]:
+def list_policies(owner_id: str) -> List[Dict[str, Any]]:
     coll = _require_collection()
-    return [_serialize_policy(doc) for doc in coll.find().sort("created_at", -1)]
+    return [_serialize_policy(doc) for doc in coll.find({"owner_id": owner_id}).sort("created_at", -1)]
 
 
-def get_policy(policy_id: str) -> Optional[Dict[str, Any]]:
+def get_policy(policy_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
     coll = _require_collection()
     try:
-        document = coll.find_one({"_id": ObjectId(policy_id)})
+        document = coll.find_one({"_id": ObjectId(policy_id), "owner_id": owner_id})
     except Exception as exc:
         raise ValueError(f"Invalid policy id: {policy_id}") from exc
     return _serialize_policy(document) if document else None
 
 
-def create_policy(payload: Dict[str, Any]) -> Dict[str, Any]:
+def create_policy(payload: Dict[str, Any], owner_id: str) -> Dict[str, Any]:
     coll = _require_collection()
     document = {
+        "owner_id": owner_id,
         "worker_name": str(payload.get("worker_name", "")).strip(),
         "policy_number": str(payload.get("policy_number", "")).strip(),
         "coverage_type": str(payload.get("coverage_type", "Basic Coverage")).strip(),
@@ -188,14 +197,14 @@ def create_policy(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         result = coll.insert_one(document)
-        return get_policy(str(result.inserted_id))
+        return get_policy(str(result.inserted_id), owner_id)
     except DuplicateKeyError as exc:
-        raise ValueError("A policy with this policy number already exists.") from exc
+        raise ValueError("A policy with this policy number already exists for this account.") from exc
     except PyMongoError as exc:
         raise RuntimeError(f"Failed to create policy: {exc}") from exc
 
 
-def update_policy(policy_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_policy(policy_id: str, payload: Dict[str, Any], owner_id: str) -> Optional[Dict[str, Any]]:
     coll = _require_collection()
     update_fields = {}
 
@@ -213,21 +222,21 @@ def update_policy(policy_id: str, payload: Dict[str, Any]) -> Optional[Dict[str,
         update_fields["notes"] = str(payload["notes"]).strip()
 
     if not update_fields:
-        return get_policy(policy_id)
+        return get_policy(policy_id, owner_id)
 
     update_fields["updated_at"] = datetime.utcnow()
 
     try:
-        coll.update_one({"_id": ObjectId(policy_id)}, {"$set": update_fields})
-        return get_policy(policy_id)
+        coll.update_one({"_id": ObjectId(policy_id), "owner_id": owner_id}, {"$set": update_fields})
+        return get_policy(policy_id, owner_id)
     except Exception as exc:
         raise ValueError(f"Invalid policy id: {policy_id}") from exc
 
 
-def delete_policy(policy_id: str) -> bool:
+def delete_policy(policy_id: str, owner_id: str) -> bool:
     coll = _require_collection()
     try:
-        result = coll.delete_one({"_id": ObjectId(policy_id)})
+        result = coll.delete_one({"_id": ObjectId(policy_id), "owner_id": owner_id})
     except Exception as exc:
         raise ValueError(f"Invalid policy id: {policy_id}") from exc
     return result.deleted_count > 0

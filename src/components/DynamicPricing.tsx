@@ -221,7 +221,7 @@ const DynamicPricing = ({ onRiskUpdate }: DynamicPricingProps) => {
     };
 
     return (
-      <Card className="p-6 bg-card border border-border transition-all duration-300">
+      <Card className="safety-card premium-interactive p-6 border-white/10">
         <div className="flex items-center gap-2 mb-4">
           <TrendingUp className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-semibold">Dynamic Premium Calculator</h2>

@@ -28,7 +28,7 @@ const RiskPulse = ({ level, value, label }: RiskPulseProps) => {
 
   return (
     <motion.div
-      className="safety-card p-6 flex flex-col items-center gap-4"
+      className="safety-card premium-interactive p-6 flex flex-col items-center gap-4"
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}

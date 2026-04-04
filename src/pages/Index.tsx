@@ -7,7 +7,9 @@ import TelemetryCard from "@/components/TelemetryCard";
 import MicroLedger from "@/components/MicroLedger";
 import PolicyCard from "@/components/PolicyCard";
 import PolicyManagement from "@/components/PolicyManagement";
+import ClaimsManagement from "@/components/ClaimsManagement";
 import DynamicPricing from "@/components/DynamicPricing";
+import { useAuth } from "@/hooks/useAuth";
 
 const telemetry = [
   { icon: CloudRain, label: "Rainfall", value: "18.2", unit: "mm/hr", status: "critical" as const },
@@ -23,6 +25,7 @@ interface RiskState {
 }
 
 const Index = () => {
+  const { user } = useAuth();
   const [risk, setRisk] = useState<RiskState>({
     level: "warning",
     value: 72,
@@ -64,45 +67,60 @@ const Index = () => {
     }
   };
 
+  const displayName =
+    (user?.user_metadata?.full_name as string | undefined)?.trim()
+    || user?.email?.split("@")[0]
+    || "there";
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container max-w-lg mx-auto px-4 pb-8">
-        <StatusHeader />
-        
-        <div className="mt-2">
-          <PayoutBanner />
+    <div className="aurora-shell min-h-screen bg-background">
+      <div className="pointer-events-none absolute -left-16 top-12 h-60 w-60 rounded-full bg-primary/15 blur-3xl drift-orb" />
+      <div className="pointer-events-none absolute right-0 top-1/3 h-72 w-72 rounded-full bg-accent/12 blur-3xl drift-orb" />
+
+      <div className="container relative max-w-6xl mx-auto px-4 pb-8">
+        <div className="fade-up-enter" style={{ animationDelay: "30ms" }}>
+          <StatusHeader />
         </div>
 
-        <div className="mt-6">
-          <RiskPulse level={risk.level} value={risk.value} label={risk.label} />
+        <div className="fade-up-enter premium-surface premium-interactive mt-2 p-5" style={{ animationDelay: "90ms" }}>
+          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Welcome back</p>
+          <h2 className="mt-1 text-2xl md:text-3xl font-bold tracking-tight">{displayName}</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Your risk, policies, and claims are now organized in one dashboard view.
+          </p>
         </div>
 
-        <div className="mt-6">
-          <DynamicPricing onRiskUpdate={handleRiskUpdate} />
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          <section className="lg:col-span-5 h-full dashboard-section space-y-6 fade-up-enter" style={{ animationDelay: "150ms" }}>
+            <PayoutBanner />
+
+            <RiskPulse level={risk.level} value={risk.value} label={risk.label} />
+
+            <DynamicPricing onRiskUpdate={handleRiskUpdate} />
+
+            <div>
+              <span className="data-label mb-3 block">Live Telemetry</span>
+              <div className="grid grid-cols-2 gap-3">
+                {telemetry.map((t, i) => (
+                  <TelemetryCard key={t.label} {...t} index={i} />
+                ))}
+              </div>
+            </div>
+
+            <PolicyCard />
+          </section>
+
+          <section className="lg:col-span-7 h-full dashboard-section space-y-6 fade-up-enter" style={{ animationDelay: "210ms" }}>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <PolicyManagement />
+              <ClaimsManagement />
+            </div>
+
+            <MicroLedger />
+          </section>
         </div>
 
-        <div className="mt-6">
-          <span className="data-label mb-3 block">Live Telemetry</span>
-          <div className="grid grid-cols-2 gap-3">
-            {telemetry.map((t, i) => (
-              <TelemetryCard key={t.label} {...t} index={i} />
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <PolicyCard />
-        </div>
-
-        <div className="mt-6">
-          <PolicyManagement />
-        </div>
-
-        <div className="mt-6">
-          <MicroLedger />
-        </div>
-
-        <footer className="mt-8 text-center">
+        <footer className="fade-up-enter premium-surface mt-8 p-3 text-center" style={{ animationDelay: "280ms" }}>
           <p className="text-[10px] text-muted-foreground uppercase tracking-[0.1em]">
             Your income, protected by the atmosphere.
           </p>

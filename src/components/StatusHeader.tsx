@@ -1,7 +1,18 @@
 import { motion } from "framer-motion";
 import { Shield } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 
 const StatusHeader = () => {
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/auth", { replace: true });
+  };
+
   return (
     <motion.header
       className="flex items-center justify-between py-4"
@@ -20,6 +31,9 @@ const StatusHeader = () => {
       </div>
 
       <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={handleSignOut}>
+          Sign Out
+        </Button>
         <div className="w-2 h-2 rounded-full bg-success animate-pulse-glow" />
         <span className="text-xs text-muted-foreground">Monitoring</span>
       </div>

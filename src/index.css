@@ -68,9 +68,67 @@
 }
 
 @layer utilities {
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes pulse-drift {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(12px, -8px, 0) scale(1.04);
+    }
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
   .safety-card {
     @apply bg-card/50 border border-white/[0.08] backdrop-blur-xl rounded-2xl;
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .premium-surface {
+    @apply rounded-2xl border border-white/[0.11] bg-card/60 backdrop-blur-xl;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .premium-interactive {
+    @apply transition-all duration-300;
+  }
+
+  .premium-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  .dashboard-section {
+    @apply rounded-3xl border border-white/10 bg-background/25 p-3 sm:p-4;
+  }
+
+  .aurora-shell {
+    @apply relative overflow-hidden;
+    background:
+      radial-gradient(50rem 28rem at -10% 15%, hsl(var(--primary) / 0.12), transparent 60%),
+      radial-gradient(35rem 24rem at 98% 38%, hsl(var(--accent) / 0.14), transparent 60%),
+      radial-gradient(28rem 18rem at 40% 100%, hsl(var(--primary) / 0.08), transparent 65%);
+  }
+
+  .fade-up-enter {
+    opacity: 0;
+    animation: fade-up 560ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .drift-orb {
+    animation: pulse-drift 8.2s ease-in-out infinite;
   }
 
   .data-label {
@@ -95,5 +153,21 @@
 
   .tabular-nums {
     font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-up-enter,
+    .drift-orb {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+
+    .premium-interactive,
+    .premium-interactive:hover {
+      transform: none;
+      transition: none;
+      box-shadow: 0 10px 34px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
   }
 }

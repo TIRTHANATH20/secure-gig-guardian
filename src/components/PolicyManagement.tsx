@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Policy {
   id: string;
@@ -80,12 +81,28 @@ const PolicyManagement = () => {
     return JSON.stringify(body);
   };
 
+  const authHeaders = async (includeJsonContentType = false) => {
+    const headers: Record<string, string> = {};
+    if (includeJsonContentType) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (!supabase) return headers;
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
   const fetchPolicies = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/policies");
+      const response = await fetch("/api/policies", {
+        headers: await authHeaders(),
+      });
       if (!response.ok) {
         const message = await parseError(response);
         throw new Error(message || "Failed to load insurance policies.");
@@ -143,9 +160,7 @@ const PolicyManagement = () => {
 
       const response = await fetch("/api/policies", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await authHeaders(true),
         body: JSON.stringify(payload),
       });
 
@@ -154,8 +169,15 @@ const PolicyManagement = () => {
         throw new Error(message || "Unable to create policy.");
       }
 
+      const createdPolicy = await response.json().catch(() => null);
+
       resetForm();
       await fetchPolicies();
+      window.dispatchEvent(
+        new CustomEvent("policies:changed", {
+          detail: { action: "created", policyId: createdPolicy?.id || null },
+        })
+      );
     } catch (err) {
       setError((err as Error).message || "Failed to save policy.");
     } finally {
@@ -170,9 +192,7 @@ const PolicyManagement = () => {
     try {
       const response = await fetch(`/api/policies/${policy.id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await authHeaders(true),
         body: JSON.stringify({ active: !policy.active }),
       });
 
@@ -182,6 +202,11 @@ const PolicyManagement = () => {
       }
 
       await fetchPolicies();
+      window.dispatchEvent(
+        new CustomEvent("policies:changed", {
+          detail: { action: "updated", policyId: policy.id },
+        })
+      );
     } catch (err) {
       setError((err as Error).message || "Failed to update policy.");
     } finally {
@@ -196,6 +221,7 @@ const PolicyManagement = () => {
     try {
       const response = await fetch(`/api/policies/${policyId}`, {
         method: "DELETE",
+        headers: await authHeaders(),
       });
 
       if (!response.ok) {
@@ -204,6 +230,11 @@ const PolicyManagement = () => {
       }
 
       await fetchPolicies();
+      window.dispatchEvent(
+        new CustomEvent("policies:changed", {
+          detail: { action: "deleted", policyId },
+        })
+      );
     } catch (err) {
       setError((err as Error).message || "Failed to delete policy.");
     } finally {
@@ -212,7 +243,7 @@ const PolicyManagement = () => {
   };
 
   return (
-    <div className="safety-card p-5">
+    <div className="safety-card premium-interactive p-5">
       <div className="flex items-center gap-2 mb-4">
         <Shield className="w-4 h-4 text-primary" />
         <span className="data-label">Insurance Policy Management</span>

@@ -4,7 +4,7 @@ import { Zap } from "lucide-react";
 const PayoutBanner = () => {
   return (
     <motion.div
-      className="safety-card p-4 glow-success border-success/20 relative overflow-hidden"
+      className="safety-card premium-interactive p-4 glow-success border-success/20 relative overflow-hidden"
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.1 }}
